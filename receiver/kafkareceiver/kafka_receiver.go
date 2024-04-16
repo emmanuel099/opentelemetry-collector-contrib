@@ -615,7 +615,7 @@ func (c *tracesConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession
 }
 
 func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()), zap.String("topic", claim.Topic()))
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
@@ -698,7 +698,7 @@ func (c *metricsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSessio
 }
 
 func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()), zap.String("topic", claim.Topic()))
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
@@ -785,7 +785,7 @@ func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) 
 }
 
 func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()), zap.String("topic", claim.Topic()))
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
