@@ -30,6 +30,7 @@ var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
 // kafkaTracesConsumer uses sarama to consume and handle messages from kafka.
 type kafkaTracesConsumer struct {
 	config            Config
+	client            sarama.Client
 	consumerGroup     sarama.ConsumerGroup
 	nextConsumer      consumer.Traces
 	topics            []string
@@ -47,6 +48,7 @@ type kafkaTracesConsumer struct {
 // kafkaMetricsConsumer uses sarama to consume and handle messages from kafka.
 type kafkaMetricsConsumer struct {
 	config            Config
+	client            sarama.Client
 	consumerGroup     sarama.ConsumerGroup
 	nextConsumer      consumer.Metrics
 	topics            []string
@@ -64,6 +66,7 @@ type kafkaMetricsConsumer struct {
 // kafkaLogsConsumer uses sarama to consume and handle messages from kafka.
 type kafkaLogsConsumer struct {
 	config            Config
+	client            sarama.Client
 	consumerGroup     sarama.ConsumerGroup
 	nextConsumer      consumer.Logs
 	topics            []string
@@ -100,7 +103,7 @@ func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler T
 	}, nil
 }
 
-func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
+func createKafkaClient(config Config) (sarama.Client, error) {
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.ClientID = config.ClientID
 	saramaConfig.Metadata.Full = config.Metadata.Full
@@ -123,7 +126,7 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 	if err := kafka.ConfigureAuthentication(config.Authentication, saramaConfig); err != nil {
 		return nil, err
 	}
-	return sarama.NewConsumerGroup(config.Brokers, config.GroupID, saramaConfig)
+	return sarama.NewClient(config.Brokers, saramaConfig)
 }
 
 func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
@@ -137,9 +140,12 @@ func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 	if err != nil {
 		return err
 	}
+	if c.client, err = createKafkaClient(c.config); err != nil {
+		return err
+	}
 	// consumerGroup may be set in tests to inject fake implementation.
 	if c.consumerGroup == nil {
-		if c.consumerGroup, err = createKafkaClient(c.config); err != nil {
+		if c.consumerGroup, err = sarama.NewConsumerGroupFromClient(c.config.GroupID, c.client); err != nil {
 			return err
 		}
 	}
@@ -224,9 +230,12 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 	if err != nil {
 		return err
 	}
+	if c.client, err = createKafkaClient(c.config); err != nil {
+		return err
+	}
 	// consumerGroup may be set in tests to inject fake implementation.
 	if c.consumerGroup == nil {
-		if c.consumerGroup, err = createKafkaClient(c.config); err != nil {
+		if c.consumerGroup, err = sarama.NewConsumerGroupFromClient(c.config.GroupID, c.client); err != nil {
 			return err
 		}
 	}
@@ -311,9 +320,12 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 	if err != nil {
 		return err
 	}
+	if c.client, err = createKafkaClient(c.config); err != nil {
+		return err
+	}
 	// consumerGroup may be set in tests to inject fake implementation.
 	if c.consumerGroup == nil {
-		if c.consumerGroup, err = createKafkaClient(c.config); err != nil {
+		if c.consumerGroup, err = sarama.NewConsumerGroupFromClient(c.config.GroupID, c.client); err != nil {
 			return err
 		}
 	}
