@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/IBM/sarama"
 	"go.opencensus.io/stats"
@@ -38,6 +39,7 @@ type kafkaTracesConsumer struct {
 	topics            []string
 	cancelConsumeLoop context.CancelFunc
 	unmarshaler       TracesUnmarshaler
+	topicRefreshTimer *time.Ticker
 
 	settings receiver.CreateSettings
 
@@ -55,6 +57,7 @@ type kafkaMetricsConsumer struct {
 	topics            []string
 	cancelConsumeLoop context.CancelFunc
 	unmarshaler       MetricsUnmarshaler
+	topicRefreshTimer *time.Ticker
 
 	settings receiver.CreateSettings
 
@@ -72,6 +75,7 @@ type kafkaLogsConsumer struct {
 	topics            []string
 	cancelConsumeLoop context.CancelFunc
 	unmarshaler       LogsUnmarshaler
+	topicRefreshTimer *time.Ticker
 
 	settings receiver.CreateSettings
 
@@ -84,6 +88,8 @@ type kafkaLogsConsumer struct {
 var _ receiver.Traces = (*kafkaTracesConsumer)(nil)
 var _ receiver.Metrics = (*kafkaMetricsConsumer)(nil)
 var _ receiver.Logs = (*kafkaLogsConsumer)(nil)
+
+const TOPIC_REFRESH_INTERVAL time.Duration = 5 * time.Second
 
 func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler TracesUnmarshaler, nextConsumer consumer.Traces) (*kafkaTracesConsumer, error) {
 	if unmarshaler == nil {
@@ -201,11 +207,7 @@ func (c *kafkaTracesConsumer) startConsumeLoop() error {
 			headers: c.headers,
 		}
 	}
-	go func() {
-		if err := c.consumeLoop(ctx, consumerGroup, consumerGroupHandler); err != nil {
-			c.settings.ReportStatus(component.NewFatalErrorEvent(err))
-		}
-	}()
+	go c.consumeLoop(ctx, consumerGroup, consumerGroupHandler)
 	<-consumerGroupHandler.ready
 	return nil
 }
@@ -228,10 +230,23 @@ func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 	if err != nil {
 		return err
 	}
-	return c.refreshTopicSubscriptions(*topicFilter)
+
+	c.topicRefreshTimer = time.NewTicker(TOPIC_REFRESH_INTERVAL)
+	go func() {
+		for {
+			if err := c.refreshTopicSubscriptions(*topicFilter); err != nil {
+				c.settings.ReportStatus(component.NewFatalErrorEvent(err))
+				c.topicRefreshTimer.Stop()
+				break
+			}
+			<-c.topicRefreshTimer.C
+		}
+	}()
+
+	return nil
 }
 
-func (c *kafkaTracesConsumer) consumeLoop(ctx context.Context, consumerGroup sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) error {
+func (c *kafkaTracesConsumer) consumeLoop(ctx context.Context, consumerGroup sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) {
 	defer consumerGroup.Close()
 	for {
 		// `Consume` should be called inside an infinite loop, when a
@@ -243,12 +258,15 @@ func (c *kafkaTracesConsumer) consumeLoop(ctx context.Context, consumerGroup sar
 		// check if context was cancelled, signaling that the consumer should stop
 		if ctx.Err() != nil {
 			c.settings.Logger.Info("Consumer stopped", zap.Error(ctx.Err()))
-			return ctx.Err()
+			break
 		}
 	}
 }
 
 func (c *kafkaTracesConsumer) Shutdown(context.Context) error {
+	if c.topicRefreshTimer != nil {
+		c.topicRefreshTimer.Stop()
+	}
 	if c.cancelConsumeLoop != nil {
 		c.cancelConsumeLoop()
 	}
@@ -326,11 +344,7 @@ func (c *kafkaMetricsConsumer) startConsumeLoop() error {
 			headers: c.headers,
 		}
 	}
-	go func() {
-		if err := c.consumeLoop(ctx, consumerGroup, consumerGroupHandler); err != nil {
-			c.settings.ReportStatus(component.NewFatalErrorEvent(err))
-		}
-	}()
+	go c.consumeLoop(ctx, consumerGroup, consumerGroupHandler)
 	<-consumerGroupHandler.ready
 	return nil
 }
@@ -353,10 +367,23 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 	if err != nil {
 		return err
 	}
-	return c.refreshTopicSubscriptions(*topicFilter)
+
+	c.topicRefreshTimer = time.NewTicker(TOPIC_REFRESH_INTERVAL)
+	go func() {
+		for {
+			if err := c.refreshTopicSubscriptions(*topicFilter); err != nil {
+				c.settings.ReportStatus(component.NewFatalErrorEvent(err))
+				c.topicRefreshTimer.Stop()
+				break
+			}
+			<-c.topicRefreshTimer.C
+		}
+	}()
+
+	return nil
 }
 
-func (c *kafkaMetricsConsumer) consumeLoop(ctx context.Context, consumerGroup sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) error {
+func (c *kafkaMetricsConsumer) consumeLoop(ctx context.Context, consumerGroup sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) {
 	defer consumerGroup.Close()
 	for {
 		// `Consume` should be called inside an infinite loop, when a
@@ -368,12 +395,15 @@ func (c *kafkaMetricsConsumer) consumeLoop(ctx context.Context, consumerGroup sa
 		// check if context was cancelled, signaling that the consumer should stop
 		if ctx.Err() != nil {
 			c.settings.Logger.Info("Consumer stopped", zap.Error(ctx.Err()))
-			return ctx.Err()
+			break
 		}
 	}
 }
 
 func (c *kafkaMetricsConsumer) Shutdown(context.Context) error {
+	if c.topicRefreshTimer != nil {
+		c.topicRefreshTimer.Stop()
+	}
 	if c.cancelConsumeLoop != nil {
 		c.cancelConsumeLoop()
 	}
@@ -451,11 +481,7 @@ func (c *kafkaLogsConsumer) startConsumeLoop() error {
 			headers: c.headers,
 		}
 	}
-	go func() {
-		if err := c.consumeLoop(ctx, consumerGroup, consumerGroupHandler); err != nil {
-			c.settings.ReportStatus(component.NewFatalErrorEvent(err))
-		}
-	}()
+	go c.consumeLoop(ctx, consumerGroup, consumerGroupHandler)
 	<-consumerGroupHandler.ready
 	return nil
 }
@@ -478,10 +504,23 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 	if err != nil {
 		return err
 	}
-	return c.refreshTopicSubscriptions(*topicFilter)
+
+	c.topicRefreshTimer = time.NewTicker(TOPIC_REFRESH_INTERVAL)
+	go func() {
+		for {
+			if err := c.refreshTopicSubscriptions(*topicFilter); err != nil {
+				c.settings.ReportStatus(component.NewFatalErrorEvent(err))
+				c.topicRefreshTimer.Stop()
+				break
+			}
+			<-c.topicRefreshTimer.C
+		}
+	}()
+
+	return nil
 }
 
-func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, consumerGroup sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) error {
+func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, consumerGroup sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) {
 	defer consumerGroup.Close()
 	for {
 		// `Consume` should be called inside an infinite loop, when a
@@ -493,12 +532,15 @@ func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, consumerGroup saram
 		// check if context was cancelled, signaling that the consumer should stop
 		if ctx.Err() != nil {
 			c.settings.Logger.Info("Consumer stopped", zap.Error(ctx.Err()))
-			return ctx.Err()
+			break
 		}
 	}
 }
 
 func (c *kafkaLogsConsumer) Shutdown(context.Context) error {
+	if c.topicRefreshTimer != nil {
+		c.topicRefreshTimer.Stop()
+	}
 	if c.cancelConsumeLoop != nil {
 		c.cancelConsumeLoop()
 	}
